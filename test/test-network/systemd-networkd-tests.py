@@ -4116,6 +4116,32 @@ class NetworkdNetworkTests(unittest.TestCase, Utilities):
         check_output('ip link set dev test1 down')
         self.wait_online('test1:off', setup_state='unmanaged')
 
+    def test_vanished_link(self):
+        # Test case for issue #43928. When a veth peer is moved to another network namespace and the
+        # namespace is removed, a pending RTM_GETLINK request may fail with ENODEV. The race is timing
+        # dependent, hence repeat it several times.
+        start_networkd()
+        since = datetime.datetime.now()
+
+        for i in range(30):
+            self.addCleanup(call_quiet, f'ip netns del ns-vanish{i}')
+            check_output(f'ip link add vanish{i} type veth peer vanishp{i}')
+            check_output(f'ip netns add ns-vanish{i}')
+            check_output(f'ip link set vanishp{i} netns ns-vanish{i}')
+            check_output(f'ip netns del ns-vanish{i}')
+
+        # Wait for networkd to drop all the links.
+        for _ in range(20):
+            if 'vanish' not in networkctl('list'):
+                break
+            time.sleep(0.5)
+        else:
+            self.fail('networkd still knows the removed links.')
+
+        for line in read_networkd_log(since=since).splitlines():
+            if 'vanish' in line:
+                self.assertNotIn('Trying to reconfigure the interface.', line)
+
     def verify_address_static(
         self,
         label1: str,
