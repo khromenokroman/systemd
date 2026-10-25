@@ -3143,6 +3143,13 @@ int link_getlink_handler_internal(sd_netlink *rtnl, sd_netlink_message *m, Link 
                 return 0;
 
         r = sd_netlink_message_get_errno(m);
+        if (r == -ENODEV) {
+                /* The interface has been removed or moved to another network namespace, and RTM_DELLINK
+                 * for it will come soon. Reconfiguring it would fail again with the same error, so let's
+                 * wait for the message and drop the link then. */
+                log_link_message_debug_errno(link, m, r, "%s, the interface has vanished, ignoring: %m", error_msg);
+                return 0;
+        }
         if (r < 0) {
                 log_link_message_warning_errno(link, m, r, "%s", error_msg);
                 link_enter_failed(link);
